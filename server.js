@@ -189,6 +189,157 @@ app.get('/api/orders/:id', async (req, res) => {
     }
 });
 
+// Admin API Routes
+
+// Get all orders with details
+app.get('/api/admin/orders', async (req, res) => {
+    try {
+        const { status, limit = 50, offset = 0 } = req.query;
+        
+        let query = `
+            SELECT
+                o.*,
+                COUNT(oi.id) as item_count
+            FROM orders o
+            LEFT JOIN order_items oi ON o.id = oi.order_id
+        `;
+        
+        let params = [];
+        
+        if (status) {
+            query += ' WHERE o.status = $1';
+            params.push(status);
+        }
+        
+        query += `
+            GROUP BY o.id
+            ORDER BY o.created_at DESC
+            LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        `;
+        
+        params.push(limit, offset);
+        
+        const result = await db.query(query, params);
+        
+        // Get total count
+        let countQuery = 'SELECT COUNT(*) FROM orders';
+        let countParams = [];
+        
+        if (status) {
+            countQuery += ' WHERE status = $1';
+            countParams.push(status);
+        }
+        
+        const countResult = await db.query(countQuery, countParams);
+        
+        res.json({
+            orders: result.rows,
+            total: parseInt(countResult.rows[0].count),
+            limit: parseInt(limit),
+            offset: parseInt(offset)
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+// Get order statistics
+app.get('/api/admin/stats', async (req, res) => {
+    try {
+        const stats = {};
+        
+        // Total orders
+        const totalOrders = await db.query('SELECT COUNT(*) FROM orders');
+        stats.totalOrders = parseInt(totalOrders.rows[0].count);
+        
+        // Total revenue
+        const totalRevenue = await db.query('SELECT SUM(total_amount) FROM orders WHERE status != $1', ['cancelled']);
+        stats.totalRevenue = parseFloat(totalRevenue.rows[0].sum || 0);
+        
+        // Orders by status
+        const ordersByStatus = await db.query(`
+            SELECT status, COUNT(*) as count
+            FROM orders
+            GROUP BY status
+        `);
+        stats.ordersByStatus = ordersByStatus.rows;
+        
+        // Recent orders (last 7 days)
+        const recentOrders = await db.query(`
+            SELECT COUNT(*)
+            FROM orders
+            WHERE created_at >= NOW() - INTERVAL '7 days'
+        `);
+        stats.recentOrders = parseInt(recentOrders.rows[0].count);
+        
+        // Top selling products
+        const topProducts = await db.query(`
+            SELECT
+                p.name,
+                SUM(oi.quantity) as units_sold,
+                SUM(oi.quantity * oi.price) as revenue
+            FROM products p
+            JOIN order_items oi ON p.id = oi.product_id
+            GROUP BY p.id, p.name
+            ORDER BY units_sold DESC
+            LIMIT 5
+        `);
+        stats.topProducts = topProducts.rows;
+        
+        res.json(stats);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+// Update order status
+app.patch('/api/admin/orders/:id/status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        
+        const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+        
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+        
+        const result = await db.query(
+            'UPDATE orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+            [status, id]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+// Delete order
+app.delete('/api/admin/orders/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const result = await db.query('DELETE FROM orders WHERE id = $1 RETURNING *', [id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        
+        res.json({ message: 'Order deleted successfully' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
 // Serve frontend
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -204,6 +355,10 @@ app.get('/cart', (req, res) => {
 
 app.get('/checkout', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'checkout.html'));
+});
+
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
 // Start server
