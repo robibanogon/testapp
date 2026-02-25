@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gadget-store
+  labels:
+    app: gadget-store
+    app.kubernetes.io/name: gadget-store
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: gadget-store
+  sessionAffinity: None
+
+# Made with Bob

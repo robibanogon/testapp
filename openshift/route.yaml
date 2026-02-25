@@ -1,0 +1,21 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: gadget-store
+  labels:
+    app: gadget-store
+    app.kubernetes.io/name: gadget-store
+    app.kubernetes.io/component: backend
+spec:
+  to:
+    kind: Service
+    name: gadget-store
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+
+# Made with Bob
